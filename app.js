@@ -1,10 +1,7 @@
 // World Cup 2026 Predictor - Client Application Logic
+// Data Layer: Firebase Realtime Database (real-time sync across all devices)
 
-// API URL configurations
-const LOCAL_API_URL = window.location.origin;
 const REMOTE_MATCHES_API = 'https://worldcup26.ir/get/games';
-// Free public CORS-enabled Key-Value database bucket for team sharing when server is not running
-const KVDB_BUCKET = 'https://kvdb.io/wc2026predictor_team_v2';
 
 // MOCK MATCHES FALLBACK DATABASE (Includes Group stage & full Knockout tree matches)
 const FALLBACK_MATCHES = [
@@ -89,13 +86,12 @@ const ISO_MAP = {
 
 // Global App State
 let state = {
-  isServerMode: false,
   currentUser: null,
   matches: [],
   predictions: [],
   leaderboardMode: 'global',
   leaderboard: [],
-  pollingInterval: null
+  firebaseListeners: []  // store refs for cleanup on logout
 };
 
 // Helper: Get Flag HTML tag (with FlagCDN and image fallback)
@@ -142,212 +138,139 @@ function resolveEmployeeName(nickname) {
   return nickname;
 }
 
-// Check Server/Client Mode on load
-async function checkNetworkMode() {
+// ── FIREBASE HELPERS ─────────────────────────────────────────────────────────
+
+// Initialize network status indicator
+function initNetworkStatus() {
   const statusEl = document.getElementById('network-status');
-  try {
-    const res = await fetch(`${LOCAL_API_URL}/api/matches`);
-    if (res.ok) {
-      state.isServerMode = true;
-      statusEl.innerHTML = `<i class="fa-solid fa-server text-success"></i> Connected to local database server`;
+  const connRef = db_firebase.ref('.info/connected');
+  connRef.on('value', snap => {
+    if (snap.val() === true) {
+      statusEl.innerHTML = `<i class="fa-solid fa-fire text-success"></i> Connected · Firebase Real-time Sync`;
       statusEl.className = "mode-indicator text-success";
     } else {
-      throw new Error();
+      statusEl.innerHTML = `<i class="fa-solid fa-cloud-arrow-up text-warning animate-pulse"></i> กำลังเชื่อมต่อ Firebase...`;
+      statusEl.className = "mode-indicator text-warning";
     }
-  } catch (e) {
-    state.isServerMode = false;
-    statusEl.innerHTML = `<i class="fa-solid fa-cloud text-warning animate-pulse"></i> Running in client-side sync mode`;
-    statusEl.className = "mode-indicator text-warning";
-    
-    // Load local storage db if empty or doesn't have all matches (auto migrate)
-    let dbStr = localStorage.getItem('wc_local_db');
-    if (!dbStr) {
-      const initialDB = {
-        users: [],
-        predictions: [],
-        matches: FALLBACK_MATCHES
-      };
-      localStorage.setItem('wc_local_db', JSON.stringify(initialDB));
-    } else {
-      try {
-        const parsed = JSON.parse(dbStr);
-        parsed.matches = parsed.matches || [];
-        // Auto migrate: If matches count is smaller, override with latest fallback matches
-        if (parsed.matches.length < FALLBACK_MATCHES.length) {
-          parsed.matches = FALLBACK_MATCHES;
-          localStorage.setItem('wc_local_db', JSON.stringify(parsed));
-          console.log("Local database successfully migrated with latest matches.");
-        }
-      } catch (err) {
-        console.error("Local DB migration failed, resetting localStorage", err);
-        localStorage.removeItem('wc_local_db');
-      }
-    }
-  }
+  });
 }
 
-// DATABASE LAYER FOR LOCAL MODE (Ensures arrays are never undefined)
-function getLocalDB() {
-  try {
-    const db = JSON.parse(localStorage.getItem('wc_local_db') || '{"users":[],"predictions":[],"matches":[]}');
-    db.users = Array.isArray(db.users) ? db.users : [];
-    db.predictions = Array.isArray(db.predictions) ? db.predictions : [];
-    db.matches = Array.isArray(db.matches) ? db.matches : [];
-    return db;
-  } catch (e) {
-    console.error("Failed to parse LocalDB, returning empty structure", e);
-    return { users: [], predictions: [], matches: [] };
-  }
-}
+// Recalculate scores for a user based on all predictions vs match results
+async function firebaseRecalculateUserPoints(userId) {
+  const [predsSnap, matchesSnap] = await Promise.all([
+    db_firebase.ref(`predictions/${userId}`).get(),
+    db_firebase.ref('matches').get()
+  ]);
 
-function saveLocalDB(db) {
-  try {
-    localStorage.setItem('wc_local_db', JSON.stringify(db));
-  } catch (e) {
-    console.error("Failed to save to localStorage", e);
-  }
-}
-
-// Calculate Client-Side Local Scores
-function localRecalculateScores(db) {
+  const preds = predsSnap.exists() ? Object.values(predsSnap.val()) : [];
+  const matches = matchesSnap.exists() ? Object.values(matchesSnap.val()) : [];
   const matchMap = {};
-  db.matches.forEach(m => { matchMap[m.id] = m; });
-  
-  const userPoints = {};
-  db.users.forEach(u => { userPoints[u.id] = 0; });
-  
-  db.predictions.forEach(pred => {
+  matches.forEach(m => { matchMap[m.id] = m; });
+
+  let points = 0;
+  preds.forEach(pred => {
     const match = matchMap[pred.matchId];
     if (match && match.finished === "TRUE") {
-      const matchHome = parseInt(match.home_score);
-      const matchAway = parseInt(match.away_score);
-      const predHome = parseInt(pred.homeScore);
-      const predAway = parseInt(pred.awayScore);
-      
-      if (isNaN(matchHome) || isNaN(matchAway) || isNaN(predHome) || isNaN(predAway)) return;
-      
-      if (matchHome === predHome && matchAway === predAway) {
-        userPoints[pred.userId] = (userPoints[pred.userId] || 0) + 3;
-      } else {
-        const matchResult = Math.sign(matchHome - matchAway);
-        const predResult = Math.sign(predHome - predAway);
-        if (matchResult === predResult) {
-          userPoints[pred.userId] = (userPoints[pred.userId] || 0) + 1;
-        }
+      const mh = parseInt(match.home_score);
+      const ma = parseInt(match.away_score);
+      const ph = parseInt(pred.homeScore);
+      const pa = parseInt(pred.awayScore);
+      if (isNaN(mh) || isNaN(ma) || isNaN(ph) || isNaN(pa)) return;
+      if (mh === ph && ma === pa) {
+        points += 3;
+      } else if (Math.sign(mh - ma) === Math.sign(ph - pa)) {
+        points += 1;
       }
     }
   });
-  
-  db.users = db.users.map(u => ({
-    ...u,
-    points: userPoints[u.id] || 0
-  }));
+  return points;
 }
 
-// CLOUD SYNC LAYER (Using KVdb for static mode)
-async function cloudTeamSync() {
-  if (state.isServerMode || !state.currentUser) return;
-  const teamCode = state.currentUser.teamCode;
-  
-  try {
-    const usersRes = await fetch(`${KVDB_BUCKET}/team_${teamCode}_users`);
-    let cloudUsers = [];
-    if (usersRes.ok) cloudUsers = await usersRes.json();
-    
-    const predsRes = await fetch(`${KVDB_BUCKET}/team_${teamCode}_preds`);
-    let cloudPreds = [];
-    if (predsRes.ok) cloudPreds = await predsRes.json();
-    
-    // Check if custom simulated matches are pushed to cloud
-    const matchesRes = await fetch(`${KVDB_BUCKET}/team_${teamCode}_matches`);
-    let cloudMatches = [];
-    if (matchesRes.ok) cloudMatches = await matchesRes.json();
-    
-    const db = getLocalDB();
-    
-    if (cloudMatches && cloudMatches.length > 0) {
-      db.matches = cloudMatches;
-    }
-    
-    cloudUsers.forEach(cu => {
-      const idx = db.users.findIndex(u => u.id === cu.id);
-      if (idx !== -1) db.users[idx] = cu;
-      else db.users.push(cu);
-    });
-    
-    cloudPreds.forEach(cp => {
-      const idx = db.predictions.findIndex(p => p.userId === cp.userId && p.matchId === cp.matchId);
-      if (idx !== -1) db.predictions[idx] = cp;
-      else db.predictions.push(cp);
-    });
-    
-    localRecalculateScores(db);
-    saveLocalDB(db);
-    
-    const me = db.users.find(u => u.id === state.currentUser.id);
-    if (me) {
-      state.currentUser.points = me.points;
-      document.getElementById('user-display-score').innerText = me.points;
-    }
-    
-    await fetchLeaderboard();
-  } catch (err) {
-    console.warn("Cloud Sync offline/delayed.", err);
+// Recalculate and save points for ALL users (called by admin after match update)
+async function firebaseRecalculateAllPoints() {
+  const usersSnap = await db_firebase.ref('users').get();
+  if (!usersSnap.exists()) return;
+  const users = usersSnap.val();
+  const updates = {};
+  for (const empId of Object.keys(users)) {
+    const pts = await firebaseRecalculateUserPoints(empId);
+    updates[`users/${empId}/points`] = pts;
   }
+  await db_firebase.ref().update(updates);
 }
 
-async function cloudPushUser() {
-  if (state.isServerMode || !state.currentUser) return;
-  const teamCode = state.currentUser.teamCode;
-  try {
-    const db = getLocalDB();
-    const teamUsers = db.users.filter(u => u.teamCode === teamCode);
-    await fetch(`${KVDB_BUCKET}/team_${teamCode}_users`, {
-      method: 'POST',
-      body: JSON.stringify(teamUsers)
-    });
-  } catch (e) {}
-}
+// ── FIREBASE REAL-TIME LISTENERS ─────────────────────────────────────────────
 
-async function cloudPushPredictions() {
-  if (state.isServerMode || !state.currentUser) return;
-  const teamCode = state.currentUser.teamCode;
-  try {
-    const db = getLocalDB();
-    const myPreds = db.predictions.filter(p => p.userId === state.currentUser.id);
-    
-    const cloudPredsRes = await fetch(`${KVDB_BUCKET}/team_${teamCode}_preds`);
-    let allPreds = [];
-    if (cloudPredsRes.ok) {
-      allPreds = await cloudPredsRes.json();
-      allPreds = allPreds.filter(p => p.userId !== state.currentUser.id);
+// Start listening to match updates in real-time
+function startMatchListener() {
+  const ref = db_firebase.ref('matches');
+  const handler = snap => {
+    if (snap.exists()) {
+      state.matches = Object.values(snap.val());
+    } else {
+      // First run: seed matches from FALLBACK_MATCHES
+      state.matches = FALLBACK_MATCHES;
+      const matchMap = {};
+      FALLBACK_MATCHES.forEach(m => { matchMap[m.id] = m; });
+      db_firebase.ref('matches').set(matchMap);
     }
-    allPreds.push(...myPreds);
-    
-    await fetch(`${KVDB_BUCKET}/team_${teamCode}_preds`, {
-      method: 'POST',
-      body: JSON.stringify(allPreds)
-    });
-  } catch (e) {}
+    populateDateFilter();
+    renderNextMatch();
+    renderRecentMatches();
+    renderPredictionList();
+    renderBracket();
+    populateAdminMatchSelect();
+  };
+  ref.on('value', handler);
+  state.firebaseListeners.push({ ref, handler });
+}
+
+// Start listening to leaderboard (all users) in real-time
+function startLeaderboardListener() {
+  const ref = db_firebase.ref('users');
+  const handler = snap => {
+    if (!snap.exists()) {
+      state.leaderboard = [];
+    } else {
+      state.leaderboard = Object.values(snap.val());
+      state.leaderboard.sort((a, b) => b.points - a.points || (a.nickname || '').localeCompare(b.nickname || ''));
+    }
+    renderLeaderboard();
+    // Update my score display
+    if (state.currentUser) {
+      const me = state.leaderboard.find(u => u.employeeId === state.currentUser.employeeId);
+      if (me) {
+        state.currentUser.points = me.points;
+        document.getElementById('user-display-score').innerText = me.points;
+      }
+    }
+  };
+  ref.on('value', handler);
+  state.firebaseListeners.push({ ref, handler });
+}
+
+// Start listening to current user's predictions in real-time
+function startPredictionListener(empId) {
+  const ref = db_firebase.ref(`predictions/${empId}`);
+  const handler = snap => {
+    state.predictions = snap.exists() ? Object.values(snap.val()) : [];
+    renderPredictionList();
+  };
+  ref.on('value', handler);
+  state.firebaseListeners.push({ ref, handler });
+}
+
+// Detach all Firebase listeners (called on logout)
+function stopAllListeners() {
+  state.firebaseListeners.forEach(({ ref, handler }) => ref.off('value', handler));
+  state.firebaseListeners = [];
 }
 
 // API INTERACTION FUNCTIONS
 async function fetchMatches() {
-  if (state.isServerMode) {
-    try {
-      const res = await fetch(`${LOCAL_API_URL}/api/matches`);
-      state.matches = await res.json();
-    } catch (e) {
-      console.error(e);
-    }
-  } else {
-    const db = getLocalDB();
-    state.matches = db.matches;
-  }
-  
-  // Populate the date filter dropdown dynamically
+  // Matches are now handled by the real-time listener startMatchListener()
+  // This function is kept for compatibility with tab-switch refresh calls
   populateDateFilter();
-  
   renderNextMatch();
   renderRecentMatches();
   renderPredictionList();
@@ -356,24 +279,15 @@ async function fetchMatches() {
 }
 
 async function fetchLeaderboard() {
+  // Leaderboard is now handled by the real-time listener startLeaderboardListener()
+  // This function renders from the already-updated state.leaderboard
+  renderLeaderboard();
+}
+
+function renderLeaderboard() {
   const container = document.getElementById('leaderboard-container');
-  state.leaderboardMode = 'global';
-  
-  if (state.isServerMode) {
-    try {
-      const url = `${LOCAL_API_URL}/api/leaderboard`;
-      const res = await fetch(url);
-      state.leaderboard = await res.json();
-    } catch (e) {
-      console.error("Leaderboard fetch failed", e);
-    }
-  } else {
-    const db = getLocalDB();
-    let list = db.users;
-    list.sort((a, b) => b.points - a.points || a.nickname.localeCompare(b.nickname));
-    state.leaderboard = list;
-  }
-  
+  if (!container) return;
+
   container.innerHTML = '';
   if (!Array.isArray(state.leaderboard) || state.leaderboard.length === 0) {
     container.innerHTML = `<div class="loading-placeholder">ยังไม่มีข้อมูลตารางคะแนน</div>`;
@@ -382,20 +296,9 @@ async function fetchLeaderboard() {
   
   state.leaderboard.forEach((player, index) => {
     const rank = index + 1;
-    const isMeClass = state.currentUser && player.id === state.currentUser.id ? 'me' : '';
+    const isMeClass = state.currentUser && player.employeeId === state.currentUser.employeeId ? 'me' : '';
     
-    // Resolve employeeId
-    let empId = player.employeeId || "";
-    if (!empId) {
-      if (player.nickname.startsWith("พนักงาน (") && player.nickname.endsWith(")")) {
-        const m = player.nickname.match(/พนักงาน \((\d+)\)/);
-        if (m) empId = m[1];
-      } else {
-        // Look up by name reverse match
-        const foundId = Object.keys(EMPLOYEE_MAP).find(key => EMPLOYEE_MAP[key] === player.nickname);
-        if (foundId) empId = foundId;
-      }
-    }
+    const empId = player.employeeId || "";
     
     let rankBadge = `<span>No. ${rank}</span>`;
     if (rank === 1) rankBadge = `<span class="rank-badge gold"><i class="fa-solid fa-trophy"></i> 1</span>`;
@@ -416,55 +319,20 @@ async function fetchLeaderboard() {
 }
 
 async function fetchUserPredictions() {
-  if (!state.currentUser) return;
-  if (state.isServerMode) {
-    try {
-      const res = await fetch(`${LOCAL_API_URL}/api/predictions/${state.currentUser.id}`);
-      state.predictions = await res.json();
-    } catch (e) {
-      console.error(e);
-    }
-  } else {
-    const db = getLocalDB();
-    state.predictions = db.predictions.filter(p => p.userId === state.currentUser.id);
-  }
+  // Predictions are now handled by the real-time listener startPredictionListener()
+  // This function is kept for compatibility
   renderPredictionList();
 }
 
-// Submit score prediction (Save to DB)
+// Submit score prediction (Save to Firebase)
 async function submitPrediction(matchId, homeScore, awayScore) {
   if (!state.currentUser) return;
-  
-  if (state.isServerMode) {
-    try {
-      await fetch(`${LOCAL_API_URL}/api/predictions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: state.currentUser.id,
-          matchId: matchId,
-          homeScore: homeScore,
-          awayScore: awayScore
-        })
-      });
-    } catch (e) {
-      console.error("Failed to submit prediction to server", e);
-      throw e;
-    }
-  } else {
-    const db = getLocalDB();
-    const idx = db.predictions.findIndex(p => p.userId === state.currentUser.id && p.matchId === matchId);
-    const predObj = { userId: state.currentUser.id, matchId, homeScore, awayScore };
-    
-    if (idx !== -1) {
-      db.predictions[idx] = predObj;
-    } else {
-      db.predictions.push(predObj);
-    }
-    
-    saveLocalDB(db);
-    await cloudPushPredictions();
-  }
+  const empId = state.currentUser.employeeId;
+  const predObj = { userId: empId, matchId, homeScore, awayScore };
+  await db_firebase.ref(`predictions/${empId}/${matchId}`).set(predObj);
+  // Recalculate and update this user's points
+  const pts = await firebaseRecalculateUserPoints(empId);
+  await db_firebase.ref(`users/${empId}/points`).set(pts);
 }
 
 // RENDERING LOGIC
@@ -991,8 +859,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.log(`Using preloaded G_EMPLOYEE_MAP with ${Object.keys(EMPLOYEE_MAP).length} employees.`);
   }
 
-  await checkNetworkMode();
-  await fetchMatches();
+  // Initialize Firebase connection status and start listening to match data
+  initNetworkStatus();
+  startMatchListener();
   
   document.getElementById('login-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1008,78 +877,45 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (!nickname) {
         throw new Error("ไม่พบรหัสพนักงานนี้ในระบบ หรือกรอกไม่ถูกต้อง กรุณากรอกรหัสพนักงานให้ถูกต้อง");
       }
-      
-      if (state.isServerMode) {
-        const res = await fetch(`${LOCAL_API_URL}/api/users/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ nickname, teamCode, employeeId: empId })
-        });
-        const data = await res.json();
-        if (data.success) {
-          state.currentUser = data.user;
-          state.currentUser.employeeId = empId;
-        } else {
-          throw new Error(data.error || "Server login failed");
-        }
+
+      // Upsert user in Firebase (employeeId is the key)
+      const userRef = db_firebase.ref(`users/${empId}`);
+      const snap = await userRef.get();
+      let user;
+      if (snap.exists()) {
+        user = snap.val();
+        // Update teamCode and nickname in case they changed
+        await userRef.update({ teamCode, nickname });
+        user.teamCode = teamCode;
+        user.nickname = nickname;
       } else {
-        const db = getLocalDB();
-        let user = db.users.find(u => u.nickname.toLowerCase() === nickname.toLowerCase() || (u.employeeId && empId && u.employeeId === empId));
-        if (!user) {
-          user = { id: '_' + Math.random().toString(36).substr(2, 9), nickname, teamCode, employeeId: empId, points: 0 };
-          db.users.push(user);
-          saveLocalDB(db);
-        } else {
-          user.nickname = nickname; // Update nickname to real name if previously fallback
-          user.teamCode = teamCode;
-          user.employeeId = empId;
-          const idx = db.users.findIndex(u => u.id === user.id);
-          db.users[idx] = user;
-          saveLocalDB(db);
-        }
-        state.currentUser = user;
-        state.currentUser.employeeId = empId;
-        await cloudPushUser();
+        user = { id: empId, nickname, teamCode, employeeId: empId, points: 0 };
+        await userRef.set(user);
+      }
+      state.currentUser = user;
+      
+      // Update UI
+      document.getElementById('user-display-name').innerText = resolveEmployeeName(nickname);
+      document.getElementById('user-display-team').innerHTML = `<i class="fa-solid fa-users"></i> TEAM: ${teamCode}`;
+      document.getElementById('user-display-score').innerText = user.points || 0;
+      
+      const teamCodeBadge = document.getElementById('team-code-badge');
+      if (teamCodeBadge) teamCodeBadge.innerText = `(${teamCode})`;
+      
+      // Hide/Show Admin Tab based on Employee ID
+      const adminTabBtn = document.querySelector('.tab-btn[data-target="admin"]');
+      if (adminTabBtn) {
+        adminTabBtn.style.display = (empId === '20027854') ? 'flex' : 'none';
       }
       
-      if (state.currentUser) {
-        document.getElementById('user-display-name').innerText = resolveEmployeeName(state.currentUser.nickname);
-        document.getElementById('user-display-team').innerHTML = `<i class="fa-solid fa-users"></i> TEAM: ${state.currentUser.teamCode}`;
-        document.getElementById('user-display-score').innerText = state.currentUser.points || 0;
-        
-        const teamCodeBadge = document.getElementById('team-code-badge');
-        if (teamCodeBadge) teamCodeBadge.innerText = `(${state.currentUser.teamCode})`;
-        
-        // Hide/Show Admin Tab based on Employee ID
-        const adminTabBtn = document.querySelector('.tab-btn[data-target="admin"]');
-        if (adminTabBtn) {
-          if (state.currentUser.employeeId === '20027854') {
-            adminTabBtn.style.display = 'flex';
-          } else {
-            adminTabBtn.style.display = 'none';
-          }
-        }
-        
-        await fetchUserPredictions();
-        await fetchLeaderboard();
-        renderBracket();
-        
-        document.getElementById('login-screen').classList.remove('active');
-        document.getElementById('main-screen').classList.add('active');
-        
-        state.pollingInterval = setInterval(async () => {
-          try {
-            if (state.isServerMode) {
-              await fetchMatches();
-              await fetchLeaderboard();
-            } else {
-              await cloudTeamSync();
-            }
-          } catch (pollingErr) {
-            console.warn("Polling error (network lag/CORS block)", pollingErr);
-          }
-        }, 4000);
-      }
+      // Start real-time Firebase listeners
+      startLeaderboardListener();
+      startPredictionListener(empId);
+      
+      document.getElementById('login-screen').classList.remove('active');
+      document.getElementById('main-screen').classList.add('active');
+      renderBracket();
+      
     } catch (err) {
       console.error("Login Form Submission Error:", err);
       alert("ไม่สามารถเข้าสู่ระบบได้: " + err.message);
@@ -1087,8 +923,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   document.getElementById('logout-btn').addEventListener('click', () => {
-    if (state.pollingInterval) clearInterval(state.pollingInterval);
+    // Stop all Firebase real-time listeners
+    stopAllListeners();
     state.currentUser = null;
+    state.predictions = [];
+    state.leaderboard = [];
     
     // Hide Admin Tab on logout
     const adminTabBtn = document.querySelector('.tab-btn[data-target="admin"]');
@@ -1159,41 +998,19 @@ document.addEventListener('DOMContentLoaded', async () => {
       const finished = document.getElementById('admin-match-finished').checked;
       
       if (!matchId) return alert("กรุณาเลือกคู่แข่งขันก่อน!");
-      
-      const payload = { matchId, homeScore: parseInt(homeScore), awayScore: parseInt(awayScore), finished };
-      
-      if (state.isServerMode) {
-        const res = await fetch(`${LOCAL_API_URL}/api/matches/simulate`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        if (res.ok) {
-          alert("บันทึกสกอร์จำลองสำเร็จ!");
-          await fetchMatches();
-        }
-      } else {
-        const db = getLocalDB();
-        const idx = db.matches.findIndex(m => m.id === matchId);
-        if (idx !== -1) {
-          db.matches[idx].home_score = String(homeScore);
-          db.matches[idx].away_score = String(awayScore);
-          db.matches[idx].finished = finished ? "TRUE" : "FALSE";
-          db.matches[idx].time_elapsed = finished ? "finished" : "notstarted";
-          
-          localRecalculateScores(db);
-          saveLocalDB(db);
-          alert("บันทึกผลการแข่งขันและคำนวณคะแนนใน LocalDB สำเร็จ!");
-          await fetchMatches();
-          
-          try {
-            await fetch(`${KVDB_BUCKET}/team_${state.currentUser.teamCode}_matches`, {
-              method: 'POST',
-              body: JSON.stringify(db.matches)
-            });
-          } catch (e) {}
-        }
-      }
+
+      // Write match result directly to Firebase → triggers real-time update for ALL users
+      await db_firebase.ref(`matches/${matchId}`).update({
+        home_score: String(homeScore),
+        away_score: String(awayScore),
+        finished: finished ? "TRUE" : "FALSE",
+        time_elapsed: finished ? "finished" : "notstarted"
+      });
+
+      // Recalculate ALL user points based on updated match
+      await firebaseRecalculateAllPoints();
+
+      alert("บันทึกผลการแข่งขันและคำนวณคะแนน Firebase สำเร็จ! ผู้เล่นทุกคนจะเห็นผลอัปเดตทันที");
     } catch (adminErr) {
       console.error("Admin Simulation Error:", adminErr);
       alert("ไม่สามารถจำลองผลได้: " + adminErr.message);
@@ -1203,26 +1020,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('admin-sync-btn').addEventListener('click', async () => {
     const logEl = document.getElementById('admin-sync-log');
     logEl.innerText = "กำลังเชื่อมต่อกับ Live API...\n";
-    
-    if (state.isServerMode) {
-      try {
-        const res = await fetch(`${LOCAL_API_URL}/api/matches/sync`, { method: 'POST' });
-        const data = await res.json();
-        if (data.success) {
-          logEl.innerText += `สำเร็จ! ดึงข้อมูลผลสกอร์จริงได้ ${data.matchesCount} แมตช์ และบันทึกคะแนนผู้ทายผลสำเร็จ.`;
-          await fetchMatches();
-        }
-      } catch (err) {
-        logEl.innerText += `ล้มเหลว: ${err.message}`;
-      }
-    } else {
-      try {
-        const res = await fetch(REMOTE_MATCHES_API);
-        if (!res.ok) throw new Error("CORS or Network Blocked");
-        const data = await res.json();
-        if (data && data.games) {
-          const db = getLocalDB();
-          db.matches = data.games.map(g => ({
+    try {
+      const res = await fetch(REMOTE_MATCHES_API);
+      if (!res.ok) throw new Error("CORS or Network Blocked");
+      const data = await res.json();
+      if (data && data.games) {
+        const matchMap = {};
+        data.games.forEach(g => {
+          matchMap[g.id] = {
             id: g.id,
             home_team_name_en: g.home_team_name_en,
             away_team_name_en: g.away_team_name_en,
@@ -1233,21 +1038,29 @@ document.addEventListener('DOMContentLoaded', async () => {
             group: g.group,
             type: g.type,
             time_elapsed: g.time_elapsed
-          }));
-          localRecalculateScores(db);
-          saveLocalDB(db);
-          logEl.innerText += `สำเร็จ! ซิงค์ผลคะแนนจริงได้ ${db.matches.length} แมตช์ ในบราวเซอร์เรียบร้อย!`;
-          await fetchMatches();
-        }
-      } catch (err) {
-        logEl.innerText += `ล้มเหลวในการดึงข้อมูลสด (ข้ามปัญหา CORS/อินเทอร์เน็ต): ${err.message}\nใช้โครงร่างสายแข่งที่มีอยู่เพื่อจำลองต่อไปได้เลยครับ`;
+          };
+        });
+        // Write all matches to Firebase → all users see live scores instantly
+        await db_firebase.ref('matches').update(matchMap);
+        // Recalculate all user points
+        await firebaseRecalculateAllPoints();
+        logEl.innerText += `สำเร็จ! ซิงค์ผลคะแนนจริงได้ ${data.games.length} แมตช์ เขียน Firebase เรียบร้อย! ผู้เล่นทุกคนจะเห็นผลทันที`;
       }
+    } catch (err) {
+      logEl.innerText += `ล้มเหลวในการดึงข้อมูลสด (ข้ามปัญหา CORS/อินเทอร์เน็ต): ${err.message}\nใช้โครงร่างสายแข่งที่มีอยู่เพื่อจำลองต่อไปได้เลยครับ`;
     }
   });
 
-  document.getElementById('admin-reset-db-btn').addEventListener('click', () => {
-    if (!confirm("ล้างข้อมูลทั้งหมด?")) return;
-    localStorage.removeItem('wc_local_db');
+  document.getElementById('admin-reset-db-btn').addEventListener('click', async () => {
+    if (!confirm("ล้างข้อมูลทั้งหมดใน Firebase? (ผู้ใช้ทุกคนจะถูกลบมสิทธิ์)")) return;
+    // Reset users and predictions in Firebase, but keep matches
+    await db_firebase.ref('users').remove();
+    await db_firebase.ref('predictions').remove();
+    // Re-seed matches from FALLBACK_MATCHES
+    const matchMap = {};
+    FALLBACK_MATCHES.forEach(m => { matchMap[m.id] = m; });
+    await db_firebase.ref('matches').set(matchMap);
+    alert("ล้างข้อมูล Firebase สำเร็จ!");
     window.location.reload();
   });
 
