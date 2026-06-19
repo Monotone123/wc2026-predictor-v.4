@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FIFA World Cup 2026 Predictor - ทายผลฟุตบอลโลก</title>
+  <!-- Global Error Logger for Debugging -->
+  <script>
+    window.onerror = function(msg, url, line, col, error) {
+      var div = document.createElement('div');
+      div.style.position = 'fixed';
+      div.style.top = '0';
+      div.style.left = '0';
+      div.style.width = '100%';
+      div.style.background = 'rgba(239, 68, 68, 0.95)';
+      div.style.color = 'white';
+      div.style.padding = '15px';
+      div.style.zIndex = '999999';
+      div.style.fontSize = '14px';
+      div.style.fontFamily = 'monospace';
+      div.style.boxShadow = '0 4px 10px rgba(0,0,0,0.3)';
+      div.innerText = '⚠️ RUNTIME ERROR CAUGHT:\nMessage: ' + msg + '\nLine: ' + line + '\nCol: ' + col + '\nFile: ' + url + '\nStack: ' + (error ? error.stack : 'No stacktrace available');
+      document.body.appendChild(div);
+      return false;
+    };
+  </script>
+  <!-- Google Fonts: Outfit -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Sarabun:wght@300;400;600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <!-- FontAwesome for Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+  
+  <!-- BACKGROUND ANIMATED GLOWS -->
+  <div class="glow-bg">
+    <div class="glow-circle gc1"></div>
+    <div class="glow-circle gc2"></div>
+  </div>
+
+  <div id="app">
+    <!-- LOGIN SCREEN -->
+    <div id="login-screen" class="screen active">
+      <div class="login-card glass-panel animate-fade-in">
+        <div class="logo-container">
+          <i class="fa-solid fa-trophy trophy-logo animate-bounce"></i>
+          <h1>WORLD CUP 2026</h1>
+          <h2>PREDICTOR</h2>
+        </div>
+        <p class="tagline">ทายผลฟุตบอลโลก 2026 ร่วมสนุกและแข่งชิงอันดับกับคนในทีมของคุณ!</p>
+        
+        <form id="login-form">
+          <div class="input-group">
+            <label for="employee-id"><i class="fa-solid fa-id-card"></i> รหัสพนักงาน (Employee ID)</label>
+            <input type="text" id="employee-id" required placeholder="เช่น 20027854" autocomplete="off">
+          </div>
+          
+          <div class="input-group">
+            <label for="team-code"><i class="fa-solid fa-users"></i> รหัสทีม (Team Code)</label>
+            <input type="text" id="team-code" required placeholder="เช่น DEVTEAM, FRIENDS2026" autocomplete="off">
+            <small class="input-help">เพื่อจัดกลุ่มคะแนนเล่นร่วมกันในทีมเดียวกัน</small>
+          </div>
+
+          <div class="mode-indicator" id="network-status">
+            <i class="fa-solid fa-circle-nodes"></i> กำลังตรวจสอบการเชื่อมต่อ...
+          </div>
+          
+          <button type="submit" class="btn btn-primary btn-block">
+            <span>เข้าสู่ระบบ & เริ่มทายผล</span> <i class="fa-solid fa-arrow-right"></i>
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- MAIN APP SCREEN -->
+    <div id="main-screen" class="screen">
+      
+      <!-- HERO BANNER SECTION -->
+      <div class="hero-banner-container" id="hero-banner">
+        <a href="#dashboard-anchor" class="hero-banner-link">
+          <img src="banner.png" alt="FIFA World Cup 2026 Banner" class="hero-banner-img">
+          <div class="hero-banner-overlay">
+            <span class="hero-banner-title">FIFA WORLD CUP 2026</span>
+            <span class="hero-banner-subtitle">
+              <i class="fa-solid fa-futbol"></i> ทายผลฟุตบอลโลก 2026 - คลิกเพื่อเลื่อนลงไปเล่นด้านล่าง <i class="fa-solid fa-chevron-down animate-bounce-slow"></i>
+            </span>
+          </div>
+        </a>
+      </div>
+
+      <div id="dashboard-anchor"></div>
+
+      <!-- TOP NAVIGATION BAR -->
+      <header class="main-header glass-panel">
+        <div class="header-brand">
+          <i class="fa-solid fa-trophy gold-trophy"></i>
+          <span class="brand-text">WORLD CUP 2026</span>
+        </div>
+        
+        <!-- USER STATUS METADATA -->
+        <div class="user-profile-widget">
+          <div class="profile-info">
+            <span class="user-name" id="user-display-name">Guest</span>
+            <span class="user-team" id="user-display-team"><i class="fa-solid fa-users"></i> TEAM: -</span>
+          </div>
+          <div class="score-badge animate-pulse">
+            <span class="score-num" id="user-display-score">0</span>
+            <span class="score-label">คะแนน</span>
+          </div>
+          <button id="logout-btn" class="btn btn-icon-only text-danger" title="ออกจากระบบ">
+            <i class="fa-solid fa-right-from-bracket"></i>
+          </button>
+        </div>
+      </header>
+
+      <!-- NAVIGATION TABS -->
+      <nav class="nav-tabs glass-panel">
+        <button class="tab-btn active" data-target="dashboard">
+          <i class="fa-solid fa-chart-line"></i> <span>แดชบอร์ด & อันดับ</span>
+        </button>
+        <button class="tab-btn" data-target="predictions">
+          <i class="fa-solid fa-circle-check"></i> <span>ส่งคำทายผล</span>
+        </button>
+        <button class="tab-btn" data-target="bracket">
+          <i class="fa-solid fa-sitemap"></i> <span>สายการแข่งขัน (Bracket)</span>
+        </button>
+        <button class="tab-btn" data-target="rules">
+          <i class="fa-solid fa-book-open"></i> <span>วิธีการเล่น & กติกา</span>
+        </button>
+        <button class="tab-btn" data-target="admin" style="display: none;">
+          <i class="fa-solid fa-sliders"></i> <span>ผู้ดูแลระบบ</span>
+        </button>
+      </nav>
+
+      <!-- CONTENT PANELS -->
+      <main class="content-container">
+        
+        <!-- PANEL: DASHBOARD -->
+        <div id="panel-dashboard" class="tab-panel active">
+          <div class="dashboard-grid">
+            
+            <!-- LEFT COLUMN: MATCHES & INFO -->
+            <div class="dashboard-left">
+              
+              <!-- HIGHLIGHT: NEXT MATCH -->
+              <section class="glass-panel next-match-section">
+                <div class="section-title">
+                  <h3><i class="fa-solid fa-hourglass-half text-warning animate-spin-slow"></i> คู่แข่งขันถัดไป (Real-time)</h3>
+                  <span class="badge badge-warning" id="next-match-countdown">กำลังเริ่ม</span>
+                </div>
+                <div id="next-match-card-container">
+                  <!-- Dynamic Next Match Card -->
+                  <div class="loading-placeholder">กำลังโหลดข้อมูล...</div>
+                </div>
+              </section>
+
+              <!-- RECENT RESULTS / LIVE GAMES -->
+              <section class="glass-panel matches-summary-section">
+                <div class="section-title">
+                  <h3><i class="fa-solid fa-futbol text-success"></i> แมตช์ล่าสุด & ผลการแข่งขัน</h3>
+                  <button id="refresh-dashboard-btn" class="btn btn-secondary btn-sm">
+                    <i class="fa-solid fa-rotate"></i> รีเฟรช
+                  </button>
+                </div>
+                <div class="match-list-compact" id="recent-matches-container">
+                  <!-- Dynamic Match Items -->
+                </div>
+              </section>
+            </div>
+
+            <!-- RIGHT COLUMN: LEADERBOARD -->
+            <div class="dashboard-right">
+              
+              <!-- LEADERBOARD TAB CONTAINER -->
+              <section class="glass-panel leaderboard-section">
+                <div class="leaderboard-title-header">
+                  <h3><i class="fa-solid fa-globe text-primary"></i> อันดับทั้งหมด (Global Leaderboard)</h3>
+                </div>
+
+                <div class="leaderboard-header">
+                  <span class="col-rank">อันดับ</span>
+                  <span class="col-id">รหัส</span>
+                  <span class="col-name">ชื่อ นามสกุล</span>
+                  <span class="col-team">ทีม</span>
+                  <span class="col-score">คะแนน</span>
+                </div>
+                
+                <div class="leaderboard-list" id="leaderboard-container">
+                  <!-- Dynamic Leaderboard Items -->
+                  <div class="loading-placeholder">กำลังโหลดตารางคะแนน...</div>
+                </div>
+                
+                <div class="rules-hint text-center">
+                  <small><i class="fa-solid fa-circle-info"></i> ทายสกอร์ถูกตรงเป๊ะ ได้ <strong>3 คะแนน</strong> | ทายผลชนะ/เสมอถูกตัว ได้ <strong>1 คะแนน</strong></small>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+
+        <!-- PANEL: PREDICTIONS -->
+        <div id="panel-predictions" class="tab-panel">
+          <div class="glass-panel prediction-container">
+            <div class="prediction-header">
+              <div>
+                <h2><i class="fa-solid fa-edit text-accent"></i> ทายผลการแข่งขัน</h2>
+                <p>เลือกผลสกอร์ที่คุณคิดว่าจะเกิดขึ้น แมตช์ที่แข่งแล้วหรือเริ่มแข่งไปแล้วจะไม่สามารถทายผลหรือแก้ไขได้</p>
+              </div>
+              <div class="filter-bar">
+                <select id="match-filter-date">
+                  <!-- Dynamic Match Dates -->
+                </select>
+                <div class="filter-checkbox-container">
+                  <label class="filter-checkbox">
+                    <input type="checkbox" id="match-filter-show-predicted">
+                    <span>แสดงคู่ที่ทายแล้ว</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="prediction-list" id="prediction-matches-container">
+              <!-- Dynamic Prediction Match Cards -->
+              <div class="loading-placeholder">กำลังโหลดรายการแข่งขัน...</div>
+            </div>
+          </div>
+        </div>
+
+
+
+        <!-- PANEL: ADMIN CONTROL -->
+        <div id="panel-admin" class="tab-panel">
+          <div class="glass-panel admin-container">
+            <h2><i class="fa-solid fa-shield-halved text-danger"></i> ระบบควบคุมผู้ดูแลระบบ (สำหรับทดสอบ / Sync)</h2>
+            <p>เมนูนี้มีไว้สำหรับผู้ดูแลระบบและอำนวยความสะดวกให้ผู้ตรวจงาน สามารถจำลองคะแนน หรือ ดึงข้อมูลผลสกอร์จริงจาก Google/API ได้แบบเรียลไทม์</p>
+            
+            <div class="admin-grid">
+              
+              <!-- API SYNC BOX -->
+              <div class="admin-card">
+                <h3><i class="fa-solid fa-arrows-rotate text-success"></i> Sync ข้อมูลผลการแข่งขันจาก API (Google Source)</h3>
+                <p>ดึงข้อมูลผลคะแนนจริงฟุตบอลโลก 2026 จาก Google/API Server โดยตรงเพื่ออัปเดตและคำนวณคะแนนของทุกคนแบบเรียลไทม์</p>
+                <button id="admin-sync-btn" class="btn btn-success btn-lg">
+                  <i class="fa-solid fa-cloud-arrow-down"></i> เริ่มการดึงข้อมูลและคํานวณคะแนน
+                </button>
+                <div id="admin-sync-log" class="sync-log-area mt-2">
+                  รอคำสั่ง...
+                </div>
+              </div>
+
+              <!-- SIMULATOR BOX -->
+              <div class="admin-card">
+                <h3><i class="fa-solid fa-gamepad text-warning"></i> เครื่องจำลองผลสกอร์แข่งขัน (Match Simulator)</h3>
+                <p>ในกรณีที่ยังไม่มีผลคะแนนจริง หรือไม่มีการเชื่อมต่ออินเทอร์เน็ต สามารถแก้ไขสกอร์แข่งขันและกดบันทึกเพื่อดูการอัปเดตตารางคะแนนเรียลไทม์ได้ทันที</p>
+                
+                <form id="admin-simulator-form">
+                  <div class="input-group">
+                    <label for="admin-select-match">เลือกคู่แข่งขัน</label>
+                    <select id="admin-select-match">
+                      <option value="">-- เลือกคู่แข่งขัน --</option>
+                    </select>
+                  </div>
+                  
+                  <div class="simulator-scores-row">
+                    <div class="score-input-box">
+                      <span id="admin-home-team-label">ทีมเหย้า</span>
+                      <input type="number" id="admin-home-score" min="0" value="0">
+                    </div>
+                    <div class="vs-divider">VS</div>
+                    <div class="score-input-box">
+                      <span id="admin-away-team-label">ทีมเยือน</span>
+                      <input type="number" id="admin-away-score" min="0" value="0">
+                    </div>
+                  </div>
+
+                  <div class="input-checkbox">
+                    <input type="checkbox" id="admin-match-finished" checked>
+                    <label for="admin-match-finished">แข่งขันจบการแข่งขันแล้ว (Finished)</label>
+                  </div>
+
+                  <button type="submit" class="btn btn-warning btn-block">
+                    <i class="fa-solid fa-floppy-disk"></i> บันทึกผลสกอร์จำลอง
+                  </button>
+                </form>
+              </div>
+            </div>
+            
+            <!-- DATABASE RESET -->
+            <div class="admin-card mt-3" style="border-color: rgba(220, 53, 69, 0.4);">
+              <h3 class="text-danger"><i class="fa-solid fa-triangle-exclamation"></i> รีเซ็ตระบบฐานข้อมูลจำลอง</h3>
+              <p>คำเตือน: การกระทำนี้จะล้างข้อมูลผู้ใช้ คำทายผล และข้อมูลทั้งหมดเพื่อเริ่มต้นจำลองระบบใหม่</p>
+              <button id="admin-reset-db-btn" class="btn btn-danger">
+                <i class="fa-solid fa-trash-can"></i> ล้างข้อมูลจำลองและตารางคะแนนทั้งหมด
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- PANEL: BRACKET (TREE DIAGRAM) -->
+        <div id="panel-bracket" class="tab-panel">
+          <div class="glass-panel bracket-container">
+            <div class="prediction-header">
+              <div>
+                <h2><i class="fa-solid fa-sitemap text-primary"></i> แผนผังสายการแข่งขัน (Knockout Bracket)</h2>
+                <p>ผังสายการแข่งขันรอบน็อคเอาท์ ทราบผลแชมป์และคู่สายแข่งในแต่ละรอบแบบเรียลไทม์พร้อมธงชาติ</p>
+              </div>
+            </div>
+            
+            <div class="bracket-wrapper">
+              <!-- R16 Round -->
+              <div class="bracket-round">
+                <h4 class="round-title">รอบ 16 ทีม</h4>
+                <div class="bracket-matches" id="bracket-r16-list">
+                  <!-- Dynamic Match Cards -->
+                </div>
+              </div>
+              
+              <!-- QF Round -->
+              <div class="bracket-round">
+                <h4 class="round-title">รอบ 8 ทีม (QF)</h4>
+                <div class="bracket-matches" id="bracket-qf-list">
+                  <!-- Dynamic Match Cards -->
+                </div>
+              </div>
+              
+              <!-- SF Round -->
+              <div class="bracket-round">
+                <h4 class="round-title">รอบรองชนะเลิศ (SF)</h4>
+                <div class="bracket-matches" id="bracket-sf-list">
+                  <!-- Dynamic Match Cards -->
+                </div>
+              </div>
+              
+              <!-- Final Round -->
+              <div class="bracket-round">
+                <h4 class="round-title">รอบชิงชนะเลิศ</h4>
+                <div class="bracket-matches" id="bracket-final-list">
+                  <!-- Dynamic Match Cards -->
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- PANEL: RULES & HOW TO PLAY -->
+        <div id="panel-rules" class="tab-panel">
+          <div class="glass-panel rules-container">
+            <div class="rules-header">
+              <h2><i class="fa-solid fa-book-open text-primary"></i> วิธีการเล่น & กติกาการทายผล</h2>
+              <p>คำแนะนำแบบทีละขั้นตอน (Step-by-Step) และเกณฑ์การคำนวณคะแนนสำหรับกิจกรรมทายผลฟุตบอลโลก 2026</p>
+            </div>
+            
+            <div class="rules-content-layout">
+              <!-- Left Column: Step-by-step tutorial -->
+              <div class="rules-tutorial-col">
+                <h3><i class="fa-solid fa-circle-info text-accent"></i> ขั้นตอนการทายผล (Step-by-Step Guide)</h3>
+                
+                <div class="tutorial-steps">
+                  <div class="step-card">
+                    <div class="step-num">1</div>
+                    <div class="step-desc">
+                      <h4>เข้าสู่ระบบด้วยรหัสพนักงาน</h4>
+                      <p>กรอกรหัสพนักงานของคุณ (เช่น 20027854) และรหัสทีม (เช่น DEVTEAM) เพื่อเข้าสู่ระบบและคำนวณอันดับในกลุ่ม</p>
+                    </div>
+                  </div>
+                  
+                  <div class="step-card">
+                    <div class="step-num">2</div>
+                    <div class="step-desc">
+                      <h4>เลือกวันแข่งขันเพื่อทายผล</h4>
+                      <p>กดแถบเมนู "ส่งคำทายผล" จากนั้นเลือกวันที่ต้องการทายในกล่องตัวกรอง (ระบบจะกรองเฉพาะคู่ที่ยังไม่แข่งมาให้ทายเพื่อความสะดวก)</p>
+                    </div>
+                  </div>
+                  
+                  <div class="step-card">
+                    <div class="step-num">3</div>
+                    <div class="step-desc">
+                      <h4>กรอกคะแนนและกดบันทึก</h4>
+                      <p>ใส่คะแนนที่คุณคาดเดาในช่องว่างของแต่ละคู่ จากนั้นคลิกปุ่ม <strong>"บันทึก"</strong> เพื่อล็อกคำทายผล คำทายที่เซฟแล้วจะขึ้นแถบสีเขียว <strong>"บันทึกแล้ว"</strong></p>
+                    </div>
+                  </div>
+                  
+                  <div class="step-card">
+                    <div class="step-num">4</div>
+                    <div class="step-desc">
+                      <h4>สะสมแต้มและไต่อันดับ</h4>
+                      <p>เมื่อการแข่งขันจริงจบลง ระบบจะคำนวณคะแนนให้อัตโนมัติแบบเรียลไทม์ และจัดอันดับผู้ทายทุกคนในตารางคะแนน Global</p>
+                    </div>
+                  </div>
+                </div>
+                
+                <!-- Visual Prediction Guide Image -->
+                <div class="tutorial-image-container">
+                  <h4><i class="fa-solid fa-image text-muted"></i> ภาพตัวอย่างการกรอกคะแนนทายผล</h4>
+                  <img src="tutorial_guide.png" alt="วิธีการกรอกคะแนนและกดบันทึกผล" class="tutorial-guide-img">
+                </div>
+              </div>
+              
+              <!-- Right Column: Rules & Points calculation -->
+              <div class="rules-points-col">
+                <h3><i class="fa-solid fa-award text-success"></i> กติกาการคำนวณแต้ม (Points System)</h3>
+                
+                <div class="points-card">
+                  <div class="point-rule-item score-exact">
+                    <div class="point-val">+3</div>
+                    <div class="point-rule-desc">
+                      <h4>ทายถูกสกอร์ตรงเป๊ะ (Exact Score)</h4>
+                      <p>ได้แต้มสูงสุดเมื่อผลสกอร์ที่คุณทายตรงกับผลแข่งขันจริงแบบเป๊ะๆ</p>
+                      <small>ตัวอย่าง: ทาย 2-1 ผลจริงออก 2-1</small>
+                    </div>
+                  </div>
+                  
+                  <div class="point-rule-item score-outcome">
+                    <div class="point-val">+1</div>
+                    <div class="point-rule-desc">
+                      <h4>ทายถูกผู้ชนะ/เสมอ (Match Outcome)</h4>
+                      <p>ได้แต้มปลอบใจเมื่อทายถูกทิศทางผู้ชนะหรือผลเสมอ แต่สกอร์ไม่ตรงเป๊ะ</p>
+                      <small>ตัวอย่าง: ทาย 3-0 ผลจริงออก 1-0 (ทายว่าเจ้าบ้านชนะถูก)</small>
+                    </div>
+                  </div>
+                  
+                  <div class="point-rule-item score-miss">
+                    <div class="point-val">0</div>
+                    <div class="point-rule-desc">
+                      <h4>ทายผิดทิศทาง (Incorrect Prediction)</h4>
+                      <p>ไม่ได้คะแนนหากทายฝั่งชนะผิด หรือทายว่าเสมอแต่มีผู้ชนะ</p>
+                      <small>ตัวอย่าง: ทาย 1-1 ผลจริงออก 2-1</small>
+                    </div>
+                  </div>
+                </div>
+                
+                <div class="rules-notices">
+                  <h4><i class="fa-solid fa-triangle-exclamation text-warning"></i> หมายเหตุสำคัญ</h4>
+                  <ul>
+                    <li>สามารถแก้ไขคำทายผลกี่ครั้งก็ได้ก่อนที่คู่นั้นจะเริ่มลงเตะแข่งขันจริง</li>
+                    <li>เมื่อแมตช์การแข่งขันเริ่มเล่นแล้ว ระบบจะปิดรับการทายผลทันที (สถานะจะเปลี่ยนเป็น Locked)</li>
+                    <li>ระบบตารางคะแนนจะประมวลผลทันทีที่แอดมินอัปเดตผลหรือกดซิงค์สกอร์จาก API</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </main>
+    </div>
+  </div>
+
+  <script src="employee_map.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
