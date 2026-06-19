@@ -1028,16 +1028,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         const matchMap = {};
         data.games.forEach(g => {
           matchMap[g.id] = {
-            id: g.id,
-            home_team_name_en: g.home_team_name_en,
-            away_team_name_en: g.away_team_name_en,
-            home_score: g.home_score === "null" || g.home_score === null ? "0" : g.home_score,
-            away_score: g.away_score === "null" || g.away_score === null ? "0" : g.away_score,
-            finished: g.finished,
-            local_date: g.local_date,
-            group: g.group,
-            type: g.type,
-            time_elapsed: g.time_elapsed
+            id: g.id || "",
+            home_team_name_en: g.home_team_name_en || "",
+            away_team_name_en: g.away_team_name_en || "",
+            home_team_label: g.home_team_label || "",
+            away_team_label: g.away_team_label || "",
+            home_score: (g.home_score === "null" || g.home_score === null || g.home_score === undefined) ? "0" : String(g.home_score),
+            away_score: (g.away_score === "null" || g.away_score === null || g.away_score === undefined) ? "0" : String(g.away_score),
+            finished: g.finished || "FALSE",
+            local_date: g.local_date || "",
+            group: g.group || "",
+            type: g.type || "",
+            time_elapsed: g.time_elapsed || "notstarted"
           };
         });
         // Write all matches to Firebase → all users see live scores instantly
